@@ -1,0 +1,87 @@
+---
+- hosts: localhost
+  become: yes
+
+  pre_tasks:
+    - name: "Install Python packages"
+      pip:
+          name: psycopg2-binary
+          state: present
+
+  tasks:
+    - name: Add apt repository
+      block:
+        - name: postgresql apt key
+          ansible.builtin.get_url:
+              url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+              dest: /etc/apt/trusted.gpg.d/postgresql.asc
+
+        - name: Add correct apt repository to dpkg
+          ansible.builtin.apt_repository:
+              repo: "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/postgresql.asc] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+              state: present
+
+    - name: Install postgresql server
+      ansible.builtin.apt:
+          name: postgresql-14
+          state: present
+          update_cache: yes
+
+    - name: "Find out if PostgreSQL is initialized"
+      ansible.builtin.stat:
+        path: "/etc/postgresql/14/main/pg_hba.conf"
+      register: postgres_data
+ 
+    - name: Allow incoming connections from all interfaces
+      ansible.builtin.replace:
+        path: /etc/postgresql/14/main/postgresql.conf
+        regexp: '^#listen_addresses = .+$'
+        replace: "listen_addresses = '*'"
+      notify: restart postgres
+ 
+    - name: "Start and enable services"
+      service:
+          name: postgresql
+          state: started
+          enabled: yes
+
+    - name: "Create app database"
+      postgresql_db:
+        state: present
+        name: "{{ db_name }}"
+      become: yes
+      become_user: postgres
+
+    - name: "Create db user"
+      postgresql_user:
+        state: present
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+      become: yes
+      become_user: postgres
+
+    - name: "Grant db user access to app db"
+      postgresql_privs:
+        type: database
+        database: "{{ db_name }}"
+        roles: "{{ db_user }}"
+        grant_option: no
+        privs: all
+      become: yes
+      become_user: postgres
+
+    - name: "Allow md5 connection for the db user"
+      postgresql_pg_hba:
+        dest: "/etc/postgresql/14/main/pg_hba.conf"
+        address: all
+        contype: host
+        databases: all
+        method: md5
+        create: true
+      become: yes
+      become_user: postgres
+      notify: restart postgres
+ 
+  handlers:
+    - name: restart postgres
+      service: name=postgresql state=restarted
