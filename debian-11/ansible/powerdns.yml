@@ -1,0 +1,69 @@
+---
+- hosts: localhost
+  become: yes
+
+  pre_tasks:
+    - name: "Install Python packages"
+      pip:
+          name: psycopg2-binary
+          state: present
+
+  tasks:
+    - name: "Disable systemd-resolved"
+      service:
+          name: systemd-resolved
+          state: stopped
+          enabled: no
+
+    - name: Add apt repository
+      block:
+        - name: powerdns apt key
+          ansible.builtin.get_url:
+              url: https://repo.powerdns.com/FD380FBB-pub.asc
+              dest: /etc/apt/trusted.gpg.d/powerdns.asc
+
+        - name: Add correct apt repository to dpkg
+          ansible.builtin.apt_repository:
+              repo: "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/powerdns.asc] http://repo.powerdns.com/debian {{ ansible_distribution_release }}-auth-47 main"
+              state: present
+
+    - name: Install postgresql server
+      ansible.builtin.apt: "name={{ item }} state=present update_cache=yes"
+      with_items:
+          - pdns-server
+          - pdns-backend-pgsql
+
+    - name: "Configure PowerDNS"
+      ansible.builtin.template:
+          src: pdns.pgsql.template.j2
+          dest: /etc/powerdns/pdns.d/pdns.local.pgsql.conf
+          owner: pdns
+          mode: '0640'
+      notify: restart pdns
+ 
+    - name: "Configure PowerDNS API ACCESS"
+      ansible.builtin.template:
+          src: pdns.api.template.j2
+          dest: /etc/powerdns/pdns.d/pdns.local.pgsql.conf
+          owner: pdns
+          mode: '0640'
+      notify: restart pdns
+
+    - name: Load Postgres schema
+      community.postgresql.postgresql_db:
+        state: restore
+        name: "{{ db_name }}"
+        target: /usr/share/doc/pdns-backend-pgsql/schema.pgsql.sql
+      become: yes
+      become_user: postgres
+      notify: restart pdns
+ 
+    - name: "Start and enable services"
+      service:
+          name: pdns
+          state: started
+          enabled: yes
+
+  handlers:
+    - name: restart pdns
+      service: name=pdns state=restarted

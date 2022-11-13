@@ -1,0 +1,12 @@
+# PGSQL Configuration
+# Launch gpgsql backend
+launch+=gpgsql
+# gmysql parameters
+gpgsql-host={{ db_host }}
+gpgsql-port={{ db_port | default('5432') }}
+gpgsql-dbname={{ db_name }}
+gpgsql-user={{ db_user }}
+gpgsql-password={{ db_password }}
+gpgsql-dnssec=yes
+# gmysql-socket=
+
